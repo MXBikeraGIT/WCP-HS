@@ -23,7 +23,7 @@ jobs:
           sudo wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources
           sudo apt update
           sudo apt install -y --install-recommends winehq-stable
-          sudo apt install -y meson ninja-build mingw-w64 mingw-w64-tools libvulkan-dev glslang-tools python3-pip git
+          sudo apt install -y meson ninja-build mingw-w64 mingw-w64-tools libvulkan-dev glslang-tools python3-pip git zstd
           pip3 install mako
 
       - name: Clone vkd3d‑proton
@@ -60,50 +60,39 @@ jobs:
           meson setup build32 --cross-file build-win32.txt --buildtype release
           meson compile -C build32
           
-          # Find all generated DLLs (debug)
-          echo "64-bit DLLs:"
-          find build64 -name "*.dll"
-          echo "32-bit DLLs:"
-          find build32 -name "*.dll"
-          
-          # Create package directory
-          mkdir -p out/system32 out/syswow64
-          
-          # Copy 64-bit DLLs – try known paths, then fallback to find
+          # Create a directory with the driver files (for the inner tar)
+          mkdir -p driver_pkg
+          # Copy 64-bit DLLs (try known paths, fallback to find)
           if [ -f build64/libs/vkd3d-proton/d3d12.dll ]; then
-            cp build64/libs/vkd3d-proton/d3d12.dll out/system32/
-            cp build64/libs/vkd3d-proton/d3d12core.dll out/system32/
+            cp build64/libs/vkd3d-proton/d3d12.dll driver_pkg/
+            cp build64/libs/vkd3d-proton/d3d12core.dll driver_pkg/
           elif [ -f build64/libs/vkd3d/d3d12.dll ]; then
-            cp build64/libs/vkd3d/d3d12.dll out/system32/
-            cp build64/libs/vkd3d/d3d12core.dll out/system32/
+            cp build64/libs/vkd3d/d3d12.dll driver_pkg/
+            cp build64/libs/vkd3d/d3d12core.dll driver_pkg/
           else
-            find build64 -name "d3d12.dll" -exec cp {} out/system32/ \;
-            find build64 -name "d3d12core.dll" -exec cp {} out/system32/ \;
+            find build64 -name "d3d12.dll" -exec cp {} driver_pkg/ \;
+            find build64 -name "d3d12core.dll" -exec cp {} driver_pkg/ \;
           fi
-          
           # Copy 32-bit DLLs
           if [ -f build32/libs/vkd3d-proton/d3d12.dll ]; then
-            cp build32/libs/vkd3d-proton/d3d12.dll out/syswow64/
-            cp build32/libs/vkd3d-proton/d3d12core.dll out/syswow64/
+            cp build32/libs/vkd3d-proton/d3d12.dll driver_pkg/
+            cp build32/libs/vkd3d-proton/d3d12core.dll driver_pkg/
           elif [ -f build32/libs/vkd3d/d3d12.dll ]; then
-            cp build32/libs/vkd3d/d3d12.dll out/syswow64/
-            cp build32/libs/vkd3d/d3d12core.dll out/syswow64/
+            cp build32/libs/vkd3d/d3d12.dll driver_pkg/
+            cp build32/libs/vkd3d/d3d12core.dll driver_pkg/
           else
-            find build32 -name "d3d12.dll" -exec cp {} out/syswow64/ \;
-            find build32 -name "d3d12core.dll" -exec cp {} out/syswow64/ \;
+            find build32 -name "d3d12.dll" -exec cp {} driver_pkg/ \;
+            find build32 -name "d3d12core.dll" -exec cp {} driver_pkg/ \;
           fi
+          # Create profile.json
+          echo '{"type":"VKD3D","version":"mali-hybrid"}' > driver_pkg/profile.json
           
-          # Verify copied files
-          echo "Files in out/system32:"
-          ls -la out/system32
-          echo "Files in out/syswow64:"
-          ls -la out/syswow64
-          
-          # Create profile.json and package
-          echo '{"type":"VKD3D","version":"mali-hybrid"}' > out/profile.json
-          cd out
-          zip -r ../vkd3d-proton-mali.wcp .
-          cd ..
+          # Create inner tar (vkd3d-proton-mali.tar) with files at root (./)
+          tar -cf vkd3d-proton-mali.tar -C driver_pkg .
+          # Compress that tar to .wcp using zstd (Winlator expects .wcp as zstd compressed tar)
+          zstd -o vkd3d-proton-mali.wcp vkd3d-proton-mali.tar
+          # Clean up
+          rm -rf driver_pkg vkd3d-proton-mali.tar
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
