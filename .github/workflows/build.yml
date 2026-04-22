@@ -20,7 +20,8 @@ jobs:
           sudo apt update
           sudo apt install -y \
             meson ninja-build \
-            gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
+            gcc-mingw-w64-i686 g++-mingw-w64-i686 \
             libvulkan-dev glslang-tools \
             python3-pip git
           pip3 install mako
