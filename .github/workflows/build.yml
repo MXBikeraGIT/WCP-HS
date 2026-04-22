@@ -20,16 +20,18 @@ jobs:
           sudo apt update
           sudo apt install -y \
             meson ninja-build \
-            mingw-w64 \
+            mingw-w64 mingw-w64-tools \
+            wine wine32 wine64 \
             libvulkan-dev glslang-tools \
             python3-pip git
           pip3 install mako
-          # Verify compilers are present
-          echo "Checking compilers:"
-          x86_64-w64-mingw32-gcc --version
-          x86_64-w64-mingw32-g++ --version
-          i686-w64-mingw32-gcc --version
-          i686-w64-mingw32-g++ --version
+          # Ensure widl is available under the cross prefix
+          if ! command -v x86_64-w64-mingw32-widl &> /dev/null; then
+            # Create symlink from system widl (if installed by wine)
+            sudo ln -s /usr/bin/widl /usr/bin/x86_64-w64-mingw32-widl
+          fi
+          # Verify
+          x86_64-w64-mingw32-widl --version || echo "widl still missing"
 
       - name: Clone vkd3d‑proton source
         run: |
