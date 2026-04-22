@@ -20,11 +20,16 @@ jobs:
           sudo apt update
           sudo apt install -y \
             meson ninja-build \
-            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
-            gcc-mingw-w64-i686 g++-mingw-w64-i686 \
+            mingw-w64 \
             libvulkan-dev glslang-tools \
             python3-pip git
           pip3 install mako
+          # Verify compilers are present
+          echo "Checking compilers:"
+          x86_64-w64-mingw32-gcc --version
+          x86_64-w64-mingw32-g++ --version
+          i686-w64-mingw32-gcc --version
+          i686-w64-mingw32-g++ --version
 
       - name: Clone vkd3d‑proton source
         run: |
