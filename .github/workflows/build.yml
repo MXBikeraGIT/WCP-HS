@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install dependencies (cross‑compilation only)
+      - name: Install dependencies
         run: |
           sudo dpkg --add-architecture i386
           sudo mkdir -pm755 /etc/apt/keyrings
@@ -49,7 +49,7 @@ jobs:
                   device->vk_info.properties.limits.maxStorageImageRange = 128 * 1024 * 1024;' libs/vkd3d/device.c
           echo "Mali workaround applied"
 
-      - name: Build for x86_64 and x86
+      - name: Build DLLs and create .wcp
         run: |
           cd src
           mkdir -p build64 build32
@@ -59,38 +59,43 @@ jobs:
           # 32-bit
           meson setup build32 --cross-file build-win32.txt --buildtype release
           meson compile -C build32
-          
-          # Create a directory with the driver files (for the inner tar)
-          mkdir -p driver_pkg
-          # Copy 64-bit DLLs (try known paths, fallback to find)
+
+          # Prepare driver package with correct folder structure (x64 and x32)
+          mkdir -p driver_pkg/x64 driver_pkg/x32
+
+          # Copy 64-bit DLLs
           if [ -f build64/libs/vkd3d-proton/d3d12.dll ]; then
-            cp build64/libs/vkd3d-proton/d3d12.dll driver_pkg/
-            cp build64/libs/vkd3d-proton/d3d12core.dll driver_pkg/
+            cp build64/libs/vkd3d-proton/d3d12.dll driver_pkg/x64/
+            cp build64/libs/vkd3d-proton/d3d12core.dll driver_pkg/x64/
           elif [ -f build64/libs/vkd3d/d3d12.dll ]; then
-            cp build64/libs/vkd3d/d3d12.dll driver_pkg/
-            cp build64/libs/vkd3d/d3d12core.dll driver_pkg/
+            cp build64/libs/vkd3d/d3d12.dll driver_pkg/x64/
+            cp build64/libs/vkd3d/d3d12core.dll driver_pkg/x64/
           else
-            find build64 -name "d3d12.dll" -exec cp {} driver_pkg/ \;
-            find build64 -name "d3d12core.dll" -exec cp {} driver_pkg/ \;
+            find build64 -name "d3d12.dll" -exec cp {} driver_pkg/x64/ \;
+            find build64 -name "d3d12core.dll" -exec cp {} driver_pkg/x64/ \;
           fi
+
           # Copy 32-bit DLLs
           if [ -f build32/libs/vkd3d-proton/d3d12.dll ]; then
-            cp build32/libs/vkd3d-proton/d3d12.dll driver_pkg/
-            cp build32/libs/vkd3d-proton/d3d12core.dll driver_pkg/
+            cp build32/libs/vkd3d-proton/d3d12.dll driver_pkg/x32/
+            cp build32/libs/vkd3d-proton/d3d12core.dll driver_pkg/x32/
           elif [ -f build32/libs/vkd3d/d3d12.dll ]; then
-            cp build32/libs/vkd3d/d3d12.dll driver_pkg/
-            cp build32/libs/vkd3d/d3d12core.dll driver_pkg/
+            cp build32/libs/vkd3d/d3d12.dll driver_pkg/x32/
+            cp build32/libs/vkd3d/d3d12core.dll driver_pkg/x32/
           else
-            find build32 -name "d3d12.dll" -exec cp {} driver_pkg/ \;
-            find build32 -name "d3d12core.dll" -exec cp {} driver_pkg/ \;
+            find build32 -name "d3d12.dll" -exec cp {} driver_pkg/x32/ \;
+            find build32 -name "d3d12core.dll" -exec cp {} driver_pkg/x32/ \;
           fi
-          # Create profile.json
+
+          # Create profile.json at root
           echo '{"type":"VKD3D","version":"mali-hybrid"}' > driver_pkg/profile.json
-          
-          # Create inner tar (vkd3d-proton-mali.tar) with files at root (./)
+
+          # Create inner tar (vkd3d-proton-mali.tar) with the driver_pkg contents at root
           tar -cf vkd3d-proton-mali.tar -C driver_pkg .
-          # Compress that tar to .wcp using zstd (Winlator expects .wcp as zstd compressed tar)
+
+          # Compress the inner tar to .wcp using zstd
           zstd -o vkd3d-proton-mali.wcp vkd3d-proton-mali.tar
+
           # Clean up
           rm -rf driver_pkg vkd3d-proton-mali.tar
 
@@ -99,12 +104,3 @@ jobs:
         with:
           name: vkd3d-proton-mali
           path: src/vkd3d-proton-mali.wcp
-
-      - name: Create GitHub Release (optional)
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: vkd3d-mali-${{ github.run_number }}
-          name: vkd3d‑proton Mali Hybrid ${{ github.run_number }}
-          files: src/vkd3d-proton-mali.wcp
-          generate_release_notes: true
