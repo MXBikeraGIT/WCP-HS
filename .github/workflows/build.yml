@@ -25,15 +25,6 @@ jobs:
             python3-pip git
           pip3 install mako
 
-      - name: Setup llvm‑mingw (if needed)
-        run: |
-          # If your scripts/setup-llvm-meson.sh exists, use it; otherwise skip
-          if [ -f scripts/setup-llvm-meson.sh ]; then
-            bash scripts/setup-llvm-meson.sh
-          else
-            echo "No setup script, using system mingw"
-          fi
-
       - name: Clone vkd3d‑proton source
         run: |
           git clone https://github.com/HansKristian-Work/vkd3d-proton.git src
@@ -43,32 +34,23 @@ jobs:
           fi
           git submodule update --init --recursive
 
-      - name: Apply Mali hybrid patch
+      - name: Apply Mali hybrid workaround (using sed)
         run: |
           cd src
-          cat > mali-hybrid.patch << 'EOF'
-          --- a/libs/vkd3d/device.c
-          +++ b/libs/vkd3d/device.c
-          @@ -1234,6 +1234,15 @@ static HRESULT d3d12_device_caps_init(struct d3d12_device *device)
-                   /* Mali GPU detection */
-                   if (strstr(device->vk_info.properties.deviceName, "Mali")) {
-                       WARN("Mali GPU detected: enabling hybrid fallback mode.\n");
-          +            /* Enable vkd3d-proton fallback flags */
-          +            device->force_bindless_texel_buffer = true;
-          +            device->no_upload_hvv = true;
-          +            /* Reduce memory limits to avoid OOM on Mali */
-          +            if (device->vk_info.properties.limits.maxStorageBufferRange > 128 * 1024 * 1024)
-          +                device->vk_info.properties.limits.maxStorageBufferRange = 128 * 1024 * 1024;
-          +            if (device->vk_info.properties.limits.maxStorageImageRange > 128 * 1024 * 1024)
-          +                device->vk_info.properties.limits.maxStorageImageRange = 128 * 1024 * 1024;
-                   }
-          EOF
-          patch -p1 < mali-hybrid.patch
+          sed -i '/if (strstr(device->vk_info.properties.deviceName, "Mali")) {/a\
+              /* Enable vkd3d-proton fallback flags */\
+              device->force_bindless_texel_buffer = true;\
+              device->no_upload_hvv = true;\
+              /* Reduce memory limits to avoid OOM on Mali */\
+              if (device->vk_info.properties.limits.maxStorageBufferRange > 128 * 1024 * 1024)\
+                  device->vk_info.properties.limits.maxStorageBufferRange = 128 * 1024 * 1024;\
+              if (device->vk_info.properties.limits.maxStorageImageRange > 128 * 1024 * 1024)\
+                  device->vk_info.properties.limits.maxStorageImageRange = 128 * 1024 * 1024;' libs/vkd3d/device.c
+          echo "Mali workaround applied to device.c"
 
       - name: Build for ARM64EC (or x86_64 / x86)
         run: |
           cd src
-          # Use manual meson cross‑compile (no need for custom scripts)
           mkdir -p build64 build32
           # 64-bit (x86_64)
           meson setup build64 --cross-file build-win64.txt --buildtype release
