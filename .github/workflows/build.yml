@@ -1,4 +1,4 @@
-name: Build vkd3d‑proton with Mali Hybrid Fallback (ARM64EC)
+name: Build vkd3d‑proton with Mali Hybrid Fallback
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install dependencies including Wine (for widl)
+      - name: Install dependencies (cross‑compilation only)
         run: |
           sudo dpkg --add-architecture i386
           sudo mkdir -pm755 /etc/apt/keyrings
@@ -53,15 +53,53 @@ jobs:
         run: |
           cd src
           mkdir -p build64 build32
+          # 64-bit
           meson setup build64 --cross-file build-win64.txt --buildtype release
           meson compile -C build64
+          # 32-bit
           meson setup build32 --cross-file build-win32.txt --buildtype release
           meson compile -C build32
+          
+          # Find all generated DLLs (debug)
+          echo "64-bit DLLs:"
+          find build64 -name "*.dll"
+          echo "32-bit DLLs:"
+          find build32 -name "*.dll"
+          
+          # Create package directory
           mkdir -p out/system32 out/syswow64
-          cp build64/libs/vkd3d/d3d12.dll out/system32/
-          cp build64/libs/vkd3d/d3d12core.dll out/system32/
-          cp build32/libs/vkd3d/d3d12.dll out/syswow64/
-          cp build32/libs/vkd3d/d3d12core.dll out/syswow64/
+          
+          # Copy 64-bit DLLs – try known paths, then fallback to find
+          if [ -f build64/libs/vkd3d-proton/d3d12.dll ]; then
+            cp build64/libs/vkd3d-proton/d3d12.dll out/system32/
+            cp build64/libs/vkd3d-proton/d3d12core.dll out/system32/
+          elif [ -f build64/libs/vkd3d/d3d12.dll ]; then
+            cp build64/libs/vkd3d/d3d12.dll out/system32/
+            cp build64/libs/vkd3d/d3d12core.dll out/system32/
+          else
+            find build64 -name "d3d12.dll" -exec cp {} out/system32/ \;
+            find build64 -name "d3d12core.dll" -exec cp {} out/system32/ \;
+          fi
+          
+          # Copy 32-bit DLLs
+          if [ -f build32/libs/vkd3d-proton/d3d12.dll ]; then
+            cp build32/libs/vkd3d-proton/d3d12.dll out/syswow64/
+            cp build32/libs/vkd3d-proton/d3d12core.dll out/syswow64/
+          elif [ -f build32/libs/vkd3d/d3d12.dll ]; then
+            cp build32/libs/vkd3d/d3d12.dll out/syswow64/
+            cp build32/libs/vkd3d/d3d12core.dll out/syswow64/
+          else
+            find build32 -name "d3d12.dll" -exec cp {} out/syswow64/ \;
+            find build32 -name "d3d12core.dll" -exec cp {} out/syswow64/ \;
+          fi
+          
+          # Verify copied files
+          echo "Files in out/system32:"
+          ls -la out/system32
+          echo "Files in out/syswow64:"
+          ls -la out/syswow64
+          
+          # Create profile.json and package
           echo '{"type":"VKD3D","version":"mali-hybrid"}' > out/profile.json
           cd out
           zip -r ../vkd3d-proton-mali.wcp .
@@ -70,7 +108,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vkd3d-proton-mali-arm64ec
+          name: vkd3d-proton-mali
           path: src/vkd3d-proton-mali.wcp
 
       - name: Create GitHub Release (optional)
