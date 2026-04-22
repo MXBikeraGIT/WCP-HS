@@ -35,19 +35,20 @@ jobs:
           fi
           git submodule update --init --recursive
 
-      - name: Apply Mali hybrid workaround
+      - name: Apply Mali hybrid workaround (enhanced)
         run: |
           cd src
           sed -i '/if (strstr(device->vk_info.properties.deviceName, "Mali")) {/a\
               /* Enable vkd3d-proton fallback flags */\
               device->force_bindless_texel_buffer = true;\
               device->no_upload_hvv = true;\
+              device->no_vertex_attribute_divisor = true;\
               /* Reduce memory limits to avoid OOM on Mali */\
               if (device->vk_info.properties.limits.maxStorageBufferRange > 128 * 1024 * 1024)\
                   device->vk_info.properties.limits.maxStorageBufferRange = 128 * 1024 * 1024;\
               if (device->vk_info.properties.limits.maxStorageImageRange > 128 * 1024 * 1024)\
                   device->vk_info.properties.limits.maxStorageImageRange = 128 * 1024 * 1024;' libs/vkd3d/device.c
-          echo "Mali workaround applied"
+          echo "Mali workaround applied (added no_vertex_attribute_divisor)"
 
       - name: Build DLLs and create .wcp
         run: |
@@ -87,7 +88,7 @@ jobs:
             find build32 -name "d3d12core.dll" -exec cp {} driver_pkg/syswow64/ \;
           fi
 
-          # Create the full profile.json as provided by the user
+          # Create the full profile.json as provided
           cat > driver_pkg/profile.json << 'EOF'
           {
             "type": "VKD3D",
