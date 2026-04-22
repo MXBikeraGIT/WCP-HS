@@ -35,20 +35,24 @@ jobs:
           fi
           git submodule update --init --recursive
 
-      - name: Apply Mali hybrid workaround (enhanced)
+      - name: Apply Mali hybrid workaround (pretend missing extensions are present)
         run: |
           cd src
+          # Force the extension to be considered supported by patching the check
+          # Look for the line that prints "Lacking support for VK_EXT_vertex_attribute_divisor"
+          # and replace the entire condition block to always succeed.
+          # We'll also add fallback flags for good measure.
+          sed -i '/Lacking support for VK_EXT_vertex_attribute_divisor/{n; s/return E_FAIL;/\/\/ return E_FAIL; \/* pretend supported *\/ return S_OK;/}' libs/vkd3d/device.c
+          # Also add the fallback flags inside the Mali detection block
           sed -i '/if (strstr(device->vk_info.properties.deviceName, "Mali")) {/a\
-              /* Enable vkd3d-proton fallback flags */\
               device->force_bindless_texel_buffer = true;\
               device->no_upload_hvv = true;\
               device->no_vertex_attribute_divisor = true;\
-              /* Reduce memory limits to avoid OOM on Mali */\
               if (device->vk_info.properties.limits.maxStorageBufferRange > 128 * 1024 * 1024)\
                   device->vk_info.properties.limits.maxStorageBufferRange = 128 * 1024 * 1024;\
               if (device->vk_info.properties.limits.maxStorageImageRange > 128 * 1024 * 1024)\
                   device->vk_info.properties.limits.maxStorageImageRange = 128 * 1024 * 1024;' libs/vkd3d/device.c
-          echo "Mali workaround applied (added no_vertex_attribute_divisor)"
+          echo "Mali workaround applied: missing extensions treated as present"
 
       - name: Build DLLs and create .wcp
         run: |
@@ -61,10 +65,9 @@ jobs:
           meson setup build32 --cross-file build-win32.txt --buildtype release
           meson compile -C build32
 
-          # Prepare driver package with system32 and syswow64 folders
           mkdir -p driver_pkg/system32 driver_pkg/syswow64
 
-          # Copy 64-bit DLLs to system32
+          # Copy 64-bit DLLs
           if [ -f build64/libs/vkd3d-proton/d3d12.dll ]; then
             cp build64/libs/vkd3d-proton/d3d12.dll driver_pkg/system32/
             cp build64/libs/vkd3d-proton/d3d12core.dll driver_pkg/system32/
@@ -76,7 +79,7 @@ jobs:
             find build64 -name "d3d12core.dll" -exec cp {} driver_pkg/system32/ \;
           fi
 
-          # Copy 32-bit DLLs to syswow64
+          # Copy 32-bit DLLs
           if [ -f build32/libs/vkd3d-proton/d3d12.dll ]; then
             cp build32/libs/vkd3d-proton/d3d12.dll driver_pkg/syswow64/
             cp build32/libs/vkd3d-proton/d3d12core.dll driver_pkg/syswow64/
@@ -88,7 +91,6 @@ jobs:
             find build32 -name "d3d12core.dll" -exec cp {} driver_pkg/syswow64/ \;
           fi
 
-          # Create the full profile.json as provided
           cat > driver_pkg/profile.json << 'EOF'
           {
             "type": "VKD3D",
@@ -116,13 +118,8 @@ jobs:
           }
           EOF
 
-          # Create inner tar (vkd3d-proton-mali.tar) with the driver_pkg contents at root
           tar -cf vkd3d-proton-mali.tar -C driver_pkg .
-
-          # Compress the inner tar to .wcp using zstd
           zstd -o vkd3d-proton-mali.wcp vkd3d-proton-mali.tar
-
-          # Clean up
           rm -rf driver_pkg vkd3d-proton-mali.tar
 
       - name: Upload artifact
