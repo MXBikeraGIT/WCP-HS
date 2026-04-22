@@ -1,0 +1,110 @@
+name: Build vkd3d‑proton with Mali Hybrid Fallback (ARM64EC)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag / commit (empty = latest master)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo (contains scripts)
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            meson ninja-build \
+            gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
+            wine wine32 wine64 \
+            libvulkan-dev glslang-tools \
+            python3-pip git
+          pip3 install mako
+
+      - name: Setup llvm‑mingw (if needed)
+        run: |
+          # If your scripts/setup-llvm-meson.sh exists, use it; otherwise install manually
+          if [ -f scripts/setup-llvm-meson.sh ]; then
+            bash scripts/setup-llvm-meson.sh
+          else
+            # Fallback: ensure mingw is available
+            sudo apt install -y gcc-mingw-w64
+          fi
+
+      - name: Clone vkd3d‑proton source
+        run: |
+          git clone https://github.com/HansKristian-Work/vkd3d-proton.git src
+          cd src
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            git checkout ${{ github.event.inputs.version }}
+          fi
+          git submodule update --init --recursive
+
+      - name: Apply Mali hybrid patch
+        run: |
+          cd src
+          cat > mali-hybrid.patch << 'EOF'
+          --- a/libs/vkd3d/device.c
+          +++ b/libs/vkd3d/device.c
+          @@ -1234,6 +1234,15 @@ static HRESULT d3d12_device_caps_init(struct d3d12_device *device)
+                   /* Mali GPU detection */
+                   if (strstr(device->vk_info.properties.deviceName, "Mali")) {
+                       WARN("Mali GPU detected: enabling hybrid fallback mode.\n");
+          +            /* Enable vkd3d-proton fallback flags */
+          +            device->force_bindless_texel_buffer = true;
+          +            device->no_upload_hvv = true;
+          +            /* Reduce memory limits to avoid OOM on Mali */
+          +            if (device->vk_info.properties.limits.maxStorageBufferRange > 128 * 1024 * 1024)
+          +                device->vk_info.properties.limits.maxStorageBufferRange = 128 * 1024 * 1024;
+          +            if (device->vk_info.properties.limits.maxStorageImageRange > 128 * 1024 * 1024)
+          +                device->vk_info.properties.limits.maxStorageImageRange = 128 * 1024 * 1024;
+                   }
+          EOF
+          patch -p1 < mali-hybrid.patch
+
+      - name: Build for ARM64EC (or x86_64 / x86)
+        run: |
+          cd src
+          # If your scripts/guts-arm64ec.sh exists, use it; otherwise build manually with meson
+          if [ -f ../scripts/guts-arm64ec.sh ]; then
+            bash ../scripts/guts-arm64ec.sh "patch" "mali" "vkd3d-proton-mali.wcp"
+          else
+            # Manual cross‑compile for 64-bit and 32-bit Windows
+            mkdir -p build64 build32
+            # 64-bit
+            meson setup build64 --cross-file build-win64.txt --buildtype release
+            meson compile -C build64
+            # 32-bit
+            meson setup build32 --cross-file build-win32.txt --buildtype release
+            meson compile -C build32
+            # Create .wcp package (simple zip of the DLLs)
+            mkdir -p out/system32 out/syswow64
+            cp build64/libs/vkd3d/d3d12.dll out/system32/
+            cp build64/libs/vkd3d/d3d12core.dll out/system32/
+            cp build32/libs/vkd3d/d3d12.dll out/syswow64/
+            cp build32/libs/vkd3d/d3d12core.dll out/syswow64/
+            echo '{"type":"VKD3D","version":"mali-hybrid"}' > out/profile.json
+            cd out
+            zip -r ../vkd3d-proton-mali.wcp .
+            cd ..
+          fi
+
+      - name: Upload .wcp artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vkd3d-proton-mali-arm64ec
+          path: src/vkd3d-proton-mali.wcp
+
+      - name: Create GitHub Release (optional)
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: vkd3d-mali-${{ github.run_number }}
+          name: vkd3d‑proton Mali Hybrid ${{ github.run_number }}
+          files: src/vkd3d-proton-mali.wcp
+          generate_release_notes: true
