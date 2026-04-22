@@ -15,25 +15,23 @@ jobs:
       - name: Checkout this repo (contains scripts)
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install dependencies (cross‑compilation only)
         run: |
           sudo apt update
           sudo apt install -y \
             meson ninja-build \
             gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 \
-            wine wine32 wine64 \
             libvulkan-dev glslang-tools \
             python3-pip git
           pip3 install mako
 
       - name: Setup llvm‑mingw (if needed)
         run: |
-          # If your scripts/setup-llvm-meson.sh exists, use it; otherwise install manually
+          # If your scripts/setup-llvm-meson.sh exists, use it; otherwise skip
           if [ -f scripts/setup-llvm-meson.sh ]; then
             bash scripts/setup-llvm-meson.sh
           else
-            # Fallback: ensure mingw is available
-            sudo apt install -y gcc-mingw-w64
+            echo "No setup script, using system mingw"
           fi
 
       - name: Clone vkd3d‑proton source
@@ -70,29 +68,24 @@ jobs:
       - name: Build for ARM64EC (or x86_64 / x86)
         run: |
           cd src
-          # If your scripts/guts-arm64ec.sh exists, use it; otherwise build manually with meson
-          if [ -f ../scripts/guts-arm64ec.sh ]; then
-            bash ../scripts/guts-arm64ec.sh "patch" "mali" "vkd3d-proton-mali.wcp"
-          else
-            # Manual cross‑compile for 64-bit and 32-bit Windows
-            mkdir -p build64 build32
-            # 64-bit
-            meson setup build64 --cross-file build-win64.txt --buildtype release
-            meson compile -C build64
-            # 32-bit
-            meson setup build32 --cross-file build-win32.txt --buildtype release
-            meson compile -C build32
-            # Create .wcp package (simple zip of the DLLs)
-            mkdir -p out/system32 out/syswow64
-            cp build64/libs/vkd3d/d3d12.dll out/system32/
-            cp build64/libs/vkd3d/d3d12core.dll out/system32/
-            cp build32/libs/vkd3d/d3d12.dll out/syswow64/
-            cp build32/libs/vkd3d/d3d12core.dll out/syswow64/
-            echo '{"type":"VKD3D","version":"mali-hybrid"}' > out/profile.json
-            cd out
-            zip -r ../vkd3d-proton-mali.wcp .
-            cd ..
-          fi
+          # Use manual meson cross‑compile (no need for custom scripts)
+          mkdir -p build64 build32
+          # 64-bit (x86_64)
+          meson setup build64 --cross-file build-win64.txt --buildtype release
+          meson compile -C build64
+          # 32-bit (x86)
+          meson setup build32 --cross-file build-win32.txt --buildtype release
+          meson compile -C build32
+          # Create .wcp package (zip of DLLs with profile.json)
+          mkdir -p out/system32 out/syswow64
+          cp build64/libs/vkd3d/d3d12.dll out/system32/
+          cp build64/libs/vkd3d/d3d12core.dll out/system32/
+          cp build32/libs/vkd3d/d3d12.dll out/syswow64/
+          cp build32/libs/vkd3d/d3d12core.dll out/syswow64/
+          echo '{"type":"VKD3D","version":"mali-hybrid"}' > out/profile.json
+          cd out
+          zip -r ../vkd3d-proton-mali.wcp .
+          cd ..
 
       - name: Upload .wcp artifact
         uses: actions/upload-artifact@v4
